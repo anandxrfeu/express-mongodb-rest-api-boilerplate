@@ -56,7 +56,7 @@ This boilerplate includes user management, JWT-based authentication, role-based 
 
 1. Clone the repo
    ```sh
-   git clone https://github.com/anandxrfeu/rest-api-boilerplate.git
+   git clone [https://github.com/anandxrfeu/rest-api-boilerplate.git](https://github.com/anandxrfeu/express-mongodb-rest-api-boilerplate.git)
    ```
 
 2. Install NPM packages
