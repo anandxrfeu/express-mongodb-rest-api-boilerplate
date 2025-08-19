@@ -4,7 +4,43 @@ import validator from "validator";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
-// Define the User schema
+// Allowed subscription statuses (mirrors Stripe states)
+const SubscriptionStatus = [
+  "incomplete",
+  "incomplete_expired",
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "unpaid",
+  "paused"
+];
+
+// Subscription sub-schema embedded inside User
+const SubscriptionSchema = new mongoose.Schema({
+  id: { type: String, index: true }, // Stripe subscription id
+  status: { type: String, enum: SubscriptionStatus },
+  priceId: { type: String },
+  productId: { type: String },
+  currentPeriodStart: { type: Date },
+  currentPeriodEnd: { type: Date },
+
+  // Trial windows (only set when status is 'trialing')
+  trialStart: { type: Date, default: null },
+  trialEnd: { type: Date, default: null },
+
+  // Cancellation and payment details
+  cancelAtPeriodEnd: { type: Boolean, default: false },
+  canceledAt: { type: Date, default: null },
+  lastInvoiceId: { type: String, default: null },
+  lastPaymentError: { type: String, default: null },
+  nextPaymentAttemptAt: { type: Date, default: null },
+  scheduledCancelAt: { type: Date, default: null },
+
+}, { _id: false, timestamps: false });
+
+
+// User schema definition
 const UserSchema = new mongoose.Schema({
 
   fullName:{
@@ -59,39 +95,86 @@ const UserSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // JWT tokens array
   tokens: [{
     token: {
       type: String,
       required: true
     }
-  }]
+  }],
+  // User’s timezone (validated by Intl.DateTimeFormat)
+  timezone: {
+    type: String,
+    default: "UTC",
+    validate: {
+      validator: (value) => {
+        try {
+          Intl.DateTimeFormat(undefined, { timeZone: value });
+          return true;
+        } catch (err) {
+          return false;
+        }
+      },
+      message: "Invalid timezone.",
+  },
+  },
+  // Stripe integration fields
+  stripeCustomerId: {
+    type: String,
+    index: true,
+    default: null
+  },
+  subscription: {
+    type: SubscriptionSchema,
+    default: null
+  },
+
 }, {
   timestamps: true
 });
 
+// Virtual flag: true if user has active or trialing subscription
+UserSchema.virtual("isPro").get(function () {
+  const s = this.subscription?.status;
+  return s === "active" || s === "trialing";
+});
 
-// Define a virtual field 'feedbacks' to establish a relationship between User and Feedback models
+// Virtual: return trialEnd if still in trial, else currentPeriodEnd
+SubscriptionSchema.virtual("effectivePeriodEnd").get(function () {
+  return this.status === "trialing" && this.trialEnd ? this.trialEnd : this.currentPeriodEnd;
+});
+
+// Virtual: user → reminders relationship
+UserSchema.virtual("reminders", {
+  ref: "Reminder",
+  localField: "_id",
+  foreignField: "owner"
+})
+
+// Virtual: user → feedback relationship
 UserSchema.virtual("feedbacks", {
   ref: "Feedback",
   localField: "_id",
   foreignField: "owner"
 })
 
-// Enables Mongoose to include virtual fields during serialization
+// Enable inclusion of virtuals in JSON / object serialization
+SubscriptionSchema.set("toObject", { virtuals: true });
+SubscriptionSchema.set("toJSON", { virtuals: true });
 UserSchema.set("toObject", { virtuals: true });
 UserSchema.set("toJSON", { virtuals: true });
 
-// Customize the JSON output by removing unwanted internal fields when the User object is serialized
+
+// Customize JSON output: hide sensitive fields
 UserSchema.methods.toJSON = function() {
   const user = this.toObject();
-  // Remove sensitive or unnecessary fields
   delete user.password
   delete user.tokens
   delete user.__v
   return user
 }
 
-// Instance method to generate an authentication token using JWT
+// Instance method: generate and persist JWT for a user
 UserSchema.methods.generateAuthToken = async function(expiresIn = process.env.JWT_EXPIRY) {
   const user = this
   const token = jwt.sign(
@@ -104,7 +187,7 @@ UserSchema.methods.generateAuthToken = async function(expiresIn = process.env.JW
   return token;
 }
 
-// Static method to authenticate a user using email and password
+// Static method: find user by email/password
 UserSchema.statics.findUserByCredentials = async (email, password) => {
   const user = await User.findOne({email,  deletedAt: null})
 
@@ -118,18 +201,24 @@ UserSchema.statics.findUserByCredentials = async (email, password) => {
   return user
 }
 
-// Mongoose middleware to hash password before saving if it has been modified
+// Middleware: hash password and normalize email before save if modified
 UserSchema.pre("save", async function(next){
   let user = this;
+
+  // Normalize email to lowercase
+  if (user.isModified("email") && typeof user.email === "string") {
+    user.email = user.email.toLowerCase();
+  }
+
+  // Hash password if changed
   if(user.isModified("password")){
-    const salt = await bcrypt.genSalt(parseInt(process.env.SALT_ROUNDS))
+    const rounds = parseInt(process.env.SALT_ROUNDS, 10) || 10; // fallback to 10
+    const salt = await bcrypt.genSalt(parseInt(rounds))
     user.password = await bcrypt.hash(user.password, salt)
   }
   next()
 })
 
-// Compile the schema into a model
+// Compile and export User model
 const User = mongoose.model("User", UserSchema);
-
-// Export the model for use in other parts of the application
 export default User;

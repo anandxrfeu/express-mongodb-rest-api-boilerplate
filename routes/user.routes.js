@@ -6,8 +6,31 @@ import auth from "../middlewares/auth.js";
 import isAdmin from "../middlewares/admin.js";
 import { sendWelcomeEmail, sendPasswordResetEmail } from "../services/email.services.js";
 import { extractFirstName } from "../utils/stringUtils.js";
+import { getCurrentTimeInUTC } from "../utils/dateUtils.js";
+import Stripe from "stripe"
 
 const userRouter = new express.Router();
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Reuse-or-create a Stripe Customer for this email/name
+async function ensureStripeCustomer({ email, fullName, existingCustomerId }) {
+
+  if (existingCustomerId) return existingCustomerId;
+
+  // Try to find by email to avoid dupes
+  const { data } = await stripe.customers.list({ email: email.toLowerCase(), limit: 1 });
+  if (data && data.length > 0) return data[0].id;
+
+  // Create new Customer
+  const customer = await stripe.customers.create({
+    email: email.toLowerCase(),
+    name: fullName,
+    metadata: { app: "remindr" },
+    //test_clock: process.env.STRIPE_TEST_CLOCK_ID     // uncomment while testing
+  });
+  return customer.id;
+}
+
 
 /**
  * POST /signUp
@@ -28,9 +51,19 @@ userRouter.post("/signUp", async (req, res) => {
         existingUser.fullName = fullName;
         existingUser.role = "USER";
         existingUser.profileURL = null;
-        token = await user.generateAuthToken("1h")
+
+        // ensure Stripe customer
+        existingUser.stripeCustomerId = await ensureStripeCustomer({
+          email,
+          fullName,
+          existingCustomerId: existingUser.stripeCustomerId
+        });
+
+        token = await existingUser.generateAuthToken("1h")
+
+
         await existingUser.save();
-        await sendWelcomeEmail(extractFirstName(fullName), email, token)
+        await sendWelcomeEmail(extractFirstName(fullName), user.email, token)
         return res.status(201).send({user: existingUser, token});
       }else{
         return res.status(409).send({error: "Email already in use."})
@@ -38,10 +71,19 @@ userRouter.post("/signUp", async (req, res) => {
     }
 
     // Create a brand new user
-    let user = new User(req.body);
+
+     // Ensure Stripe customer before saving (or create after and patch—your call)
+    const stripeCustomerId = await ensureStripeCustomer({ email, fullName });
+
+    let user = new User({
+      email,
+      password,        // pre-save hashes
+      fullName,
+      role: "USER",
+      stripeCustomerId});
     token = await user.generateAuthToken("1h")
     user = await user.save();
-    await sendWelcomeEmail(extractFirstName(fullName), email, token)
+    await sendWelcomeEmail(extractFirstName(fullName), user.email, token)
     res.status(201).send({user, token})
   }catch(err){
     res.status(500).send({error: err.message})
@@ -303,7 +345,7 @@ userRouter.delete("/user/me", auth, async (req, res) => {
     }
 
     // Proceed with soft delete
-    user.deletedAt = new Date();
+    user.deletedAt = getCurrentTimeInUTC()
     await user.save()
     res.status(200).end()
   }catch(err){
@@ -313,7 +355,7 @@ userRouter.delete("/user/me", auth, async (req, res) => {
 
 
 /**
- * GET /user/me/tasks
+ * GET /user/me/feedback
  * Get all tasks created by the user
  */
 userRouter.get("/user/me/feedback", auth, async (req, res) => {
@@ -324,6 +366,7 @@ userRouter.get("/user/me/feedback", auth, async (req, res) => {
     res.status(500).send({error: err.message})
   }
 })
+
 
 // Export the router to be used in the app
 export default userRouter;
