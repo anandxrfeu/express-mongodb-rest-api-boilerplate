@@ -1,8 +1,8 @@
 # REST API Boilerplate
 
-A modular, production-ready **Node.js + Express + MongoDB** backend starter, designed for rapid development of authenticated REST APIs.
+A modular, production-ready **Node.js + Express + MongoDB** backend starter, designed for rapid development of authenticated REST APIs with built-in **Stripe-powered subscription management**.
 
-This boilerplate includes user management, JWT-based authentication, role-based access, email verification, password reset, and file uploads via Cloudinary.
+This boilerplate includes user management, JWT-based authentication, role-based access, email verification, password reset, file uploads via Cloudinary, and subscription billing using Stripe.
 
 
 ## 🧱 Tech Stack
@@ -10,6 +10,7 @@ This boilerplate includes user management, JWT-based authentication, role-based 
 - **Node.js** + **Express**
 - **MongoDB** + **Mongoose**
 - **JWT** for authentication
+- **Stripe** for subscription payments
 - **SendGrid** for transactional emails
 - **Cloudinary** for file uploads
 - **Multer** for handling file input
@@ -26,6 +27,13 @@ This boilerplate includes user management, JWT-based authentication, role-based 
 - Soft deletion of users
 - Feedback module (create, read, update, delete)
 - Fully documented via Swagger at `/docs`
+
+## 🔔 Stripe-Specific Features
+- Checkout session creation with Stripe
+- Support for trials and recurring subscriptions
+- Webhook handling for subscription lifecycle events (trial start/end, payment success/failure, cancellation)
+- Automatic user isPro flag updates based on subscription status
+- Email notifications for trial ending, subscription expiring, and cancellations
 
 
 ## 📫 API Endpoints (Selected)
@@ -51,6 +59,13 @@ This boilerplate includes user management, JWT-based authentication, role-based 
 | ------ | -------------- | --------------------------- |
 | POST   | `/file/upload` | Upload a file to Cloudinary |
 
+### 💳 Stripe Billing
+| Method | Endpoint                    | Description                          |
+| ------ | --------------------------- | ------------------------------------ |
+| POST   | `/billing/create-checkout`  | Create a Stripe Checkout session     |
+| POST   | `/billing/webhook`          | Stripe webhook for subscription flow |
+| POST   | `/billing/status`           | Get user's status.                   |
+| POST   | `/billing/portal`           | Create stripe billing portal session |
 
 ## 🧪 Getting Started
 
@@ -78,12 +93,12 @@ This boilerplate includes user management, JWT-based authentication, role-based 
 ## 📁 Folder Structure
    ```sh
   ├── config/            # DB, cloudinary, environment config
+  ├── docs/api-spec.yaml # OpenAPI spec
   ├── middlewares/       # Auth, admin checks
-  ├── models/            # Mongoose schemas (User, Feedback)
+  ├── models/            # Mongoose schemas (User, Feedback, PaymentEvent)
   ├── routes/            # Express route handlers
   ├── services/          # Email service abstraction
   ├── utils/             # Stateless helpers (string utils)
-  ├── swagger.yaml       # OpenAPI spec
   ├── app.js             # Main application entry point
 
    ```
